@@ -1,1 +1,392 @@
+import spotipy
+import os
+import pandas as pd
+from spotipy.oauth2 import SpotifyClientCredentials
 
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id="a408aff0d2144935b690af228cd17f43",
+                                                           client_secret="2f085d237f604ca6a04b63947290e55c"))
+
+artist_ids = ['137W8MRPWKqSmrBGDBFSop', ] #'7dGJo4pcD2V6oG8kP0tJRR', '7vk5e3vY1uw9plTHJAMwjN', '53XhwfbYqKCa1cC15pYq2q', '1Cs0zKBU1kc0i8ypK3B9ai', '15UsOTVnJzReFVN1VCnxy4', '1Xyo4u8uXC1ZmMpatF05PJ', '06HL4z0CvFAxyc27GXpf02', '246dkjvS1zLTtiykXe5h60', '64KEffDW9EtZ1y2vBYgq8T', '66CXWjxzNUsdJxJ2JdwvnR', '1uNFoZAHBGtllmzznpCI3s', '60d24wfXkVzDSfLS6hyCjZ', '6eUKZXaKkcviH0Ku9w2n3V', '6M2wZ9GZgrQXHCFfjv46we', '4VMYDCV2IEDYJArk749S6m', '69GGBxA162lTqCwzJG5jLp', '0du5cEVh5yTK9QJze8zA0C', '41MozSoPIsD1dJM0CLPjZF', '6qqNVTkY8uBg9cP3Jd7DAH', '4q3ewBCX7sLwd24euuV69X', '3TVXtAsR1Inumwj472S9r4', '4AK6F7OLvEQ5QYCBNiQWHq', '6jJ0s89eD6GaHleKKya26X', '5pKCCKE2ajJHZ9KAiaK11H', '0TnOYISbd1XYRBk9myaseg', '0Y5tJX1MQlPlqiwlOH1tJY', '04gDigrS5kc9YWfZHwBETP'
+
+
+for artist_id in artist_ids:
+    try:
+        top_tracks = sp.artist_top_tracks(artist_id)
+    except Exception as e:
+        print(f"Error fetching top tracks for artist {artist_id}: {e}")
+        continue  # Skip to the next artist if there's an error
+
+    albums = []
+    try:
+        results = sp.artist_albums(artist_id, album_type='album', limit=30)
+        if results and 'items' in results:
+            albums.extend(results['items'])
+    except Exception as e:
+        print(f"Error fetching albums for artist {artist_id}: {e}")
+        continue  # Skip to the next artist if there's an error
+
+    while results and results.get('next') and len(albums) < 50:
+        try:
+            results = sp.next(results)
+            if results and 'items' in results:
+                albums.extend(results['items'])
+        except Exception as e:
+            print(f"Error fetching additional albums for artist {artist_id}: {e}")
+            break  # Exit the while loop if there's an error
+
+    tracks = []
+    for album in albums:
+        album_tracks = sp.album_tracks(album['id'])['items']
+        for track in album_tracks:
+            if len(tracks) < 50:
+                track_details = sp.track(track['id'])
+                tracks.append(track_details)
+            else:
+                break
+        if len(tracks) >= 50:
+            break
+    tracks_data = []
+    for idx, track in enumerate(tracks):
+
+
+        audio_features = sp.audio_features(track['id'])[0]
+
+        track_info = {
+            "Track Name": track['name'],
+            "Artist(s)": ", ".join([artist['name'] for artist in track['artists']]),
+            "Album": track['album']['name'],
+            "Release Date": track['album']['release_date'],
+            "Duration (ms)": track['duration_ms'],
+            "Popularity": track['popularity'],
+            "Available Markets:": ", ".join(track['available_markets']),
+            "Preview URL:": track['preview_url'],
+            "External URLs:": track['external_urls']['spotify'],
+
+        }
+
+        # Append audio features if available
+        if audio_features:
+            track_info.update({
+                "Danceability": audio_features['danceability'],
+                "Energy": audio_features['energy'],
+                "Key": audio_features['key'],
+                "Loudness": audio_features['loudness'],
+                "Mode": audio_features['mode'],
+                "Speechiness": audio_features['speechiness'],
+                "Acousticness": audio_features['acousticness'],
+                "Instrumentalness": audio_features['instrumentalness'],
+                "Liveness": audio_features['liveness'],
+                "Valence": audio_features['valence'],
+                "Tempo": audio_features['tempo'],
+                "Time Signature": audio_features['time_signature']
+            })
+        tracks_data.append(track_info)
+
+    df = pd.DataFrame(tracks_data)
+
+    csv_file_path = 'spotify_data_ver1.csv'  # Replace with your CSV file path
+
+    # Check if the CSV file exists
+    if os.path.exists(csv_file_path):
+        # Append without writing the header
+        df.to_csv(csv_file_path, mode='a', index=False, header=False)
+    else:
+        # Write new file with header
+        df.to_csv(csv_file_path, mode='w', index=False, header=True)
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+import requests
+import csv
+
+def fetch_videos(api_key, channel_id, max_results=100):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' and 'fields' parameters for videos
+    part_param = "snippet"
+    fields_param = f"items(id,snippet/title,snippet/publishedAt,snippet/channelId)&maxResults={max_results}"
+
+    # Make the API request for videos
+    url = f"{base_url}search?key={api_key}&part={part_param}&channelId={channel_id}&{fields_param}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        search_results = response.json()
+        video_ids = [item["id"]["videoId"] if "videoId" in item["id"] else item["id"].get("channelId", "") for item in search_results.get("items", [])]
+
+        # Fetch channel details
+        channel_data = fetch_channel_details(api_key, channel_id)
+        channel_name = channel_data.get("items", [])[0]["snippet"]["title"] if channel_data else "N/A"
+
+        videos_data = fetch_video_details(api_key, video_ids)
+        return videos_data, channel_name
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None, None
+
+def fetch_video_details(api_key, video_ids):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' parameter for video details
+    part_param = "snippet,contentDetails,statistics"
+
+    # Convert video_ids list to a comma-separated string
+    video_ids_str = ",".join(video_ids)
+
+    # Make the API request for video details
+    url = f"{base_url}videos?key={api_key}&part={part_param}&id={video_ids_str}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        videos_data = response.json()
+        return videos_data
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None
+
+def fetch_channel_details(api_key, channel_id):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' parameter for channel details
+    part_param = "snippet"
+
+    # Make the API request for channel details
+    url = f"{base_url}channels?key={api_key}&part={part_param}&id={channel_id}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        channel_data = response.json()
+        return channel_data
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None
+
+def main():
+  # Change key and id
+    api_key = "AIzaSyBHmvcOcL_2aQO0PKxEBgG8QJSPfKVsMPU"
+    channel_id = "UCfM3zsQsOnfWNUppiycmBuw"
+    max_results = 1
+
+    videos_data, channel_name = fetch_videos(api_key, channel_id, max_results)
+
+    if videos_data:
+        # Process the retrieved videos data
+        # Process the retrieved videos data
+          for item in videos_data.get("items", []):
+            video_title = item["snippet"]["title"]
+            published_at = item["snippet"]["publishedAt"]
+
+    # Additional details
+            views = item["statistics"]["viewCount"] if "statistics" in item else "N/A"
+            comments = item["statistics"]["commentCount"] if "statistics" in item else "N/A"
+            likes = item["statistics"]["likeCount"] if "statistics" in item else "N/A"
+            if "dislikeCount" in item.get("statistics", {}):
+                dislikes = item["statistics"]["dislikeCount"]
+            else:import requests
+import csv
+
+def fetch_videos(api_key, channel_id, max_results=100):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' and 'fields' parameters for videos
+    part_param = "snippet"
+    fields_param = f"items(id,snippet/title,snippet/publishedAt,snippet/channelId)&maxResults={max_results}"
+
+    # Make the API request for videos
+    url = f"{base_url}search?key={api_key}&part={part_param}&channelId={channel_id}&{fields_param}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        search_results = response.json()
+        video_ids = [item["id"]["videoId"] if "videoId" in item["id"] else item["id"].get("channelId", "") for item in search_results.get("items", [])]
+
+        # Fetch channel details
+        channel_data = fetch_channel_details(api_key, channel_id)
+        channel_name = channel_data.get("items", [])[0]["snippet"]["title"] if channel_data else "N/A"
+
+        videos_data = fetch_video_details(api_key, video_ids)
+        return videos_data, channel_name
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None, None
+
+def fetch_video_details(api_key, video_ids):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' parameter for video details
+    part_param = "snippet,contentDetails,statistics"
+
+    # Convert video_ids list to a comma-separated string
+    video_ids_str = ",".join(video_ids)
+
+    # Make the API request for video details
+    url = f"{base_url}videos?key={api_key}&part={part_param}&id={video_ids_str}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        videos_data = response.json()
+        return videos_data
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None
+
+def fetch_channel_details(api_key, channel_id):
+    base_url = "https://www.googleapis.com/youtube/v3/"
+
+    # Define 'part' parameter for channel details
+    part_param = "snippet"
+
+    # Make the API request for channel details
+    url = f"{base_url}channels?key={api_key}&part={part_param}&id={channel_id}"
+    response = requests.get(url)
+
+    # Process the response
+    if response.status_code == 200:
+        channel_data = response.json()
+        return channel_data
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None
+
+# Function to write video details to a CSV file
+def write_to_csv(file_path, video_data):
+    fieldnames = [
+        "Title", "Published At", "Channel Title",
+        "Views", "Likes",  "Comments",
+        "Description", "Tags", "Duration",
+    ]
+
+    with open(file_path, mode="w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+        # Write header
+        writer.writeheader()
+
+        # Write video details
+        for item in video_data.get("items", []):
+            video_title = item["snippet"]["title"]
+            published_at = item["snippet"]["publishedAt"]
+            views = item["statistics"]["viewCount"] if "statistics" in item else "N/A"
+            #comments = item["statistics"]["commentCount"] if "statistics" in item else "N/A"
+            comments = item["statistics"].get("commentCount", 0)
+            likes = item["statistics"]["likeCount"] if "statistics" in item else "N/A"
+
+            channel_title = item["snippet"]["channelTitle"]
+            description = item["snippet"]["description"]
+            tags = item["snippet"]["tags"] if "tags" in item["snippet"] else []
+            duration = item["contentDetails"]["duration"] if "contentDetails" in item else "N/A"
+
+            # Write row
+            writer.writerow({
+                "Title": video_title,
+                "Published At": published_at,
+                "Channel Title": channel_title,
+                "Views": views,
+                "Likes": likes,
+                "Comments": comments,
+                "Description": description,
+                "Tags": ', '.join(tags),
+                "Duration": duration,
+            })
+
+def main():
+    # Change key and id
+    api_key = " "
+    channel_id = "UC5H_KXkPbEsGs0tFt8R35mA"
+    max_results = 200
+
+    videos_data, channel_name = fetch_videos(api_key, channel_id, max_results)
+
+    if videos_data:
+        # Process the retrieved videos data
+        for item in videos_data.get("items", []):
+            video_title = item["snippet"]["title"]
+            published_at = item["snippet"]["publishedAt"]
+
+            # Additional details
+            views = item["statistics"]["viewCount"] if "statistics" in item else "N/A"
+            #comments = item["statistics"]["commentCount"] if "statistics" in item else "N/A"
+            comments = item["statistics"].get("commentCount", 0)
+            likes = item["statistics"]["likeCount"] if "statistics" in item else "N/A"
+
+            # Additional details
+            channel_title = item["snippet"]["channelTitle"]
+            description = item["snippet"]["description"]
+            tags = item["snippet"]["tags"] if "tags" in item["snippet"] else []
+
+            # Content details
+            duration = item["contentDetails"]["duration"] if "contentDetails" in item else "N/A"
+
+
+            # Create a list for each video
+            video_details = [
+                f"Title: {video_title}",
+                f"Published At: {published_at}",
+                f"Channel Title: {channel_title}",
+                f"Views: {views}",
+                f"Likes: {likes}",
+                f"Comments: {comments}",
+                f"Description: {description}",
+                f"Tags: {', '.join(tags)}",
+                f"Duration: {duration}"
+            ]
+
+            # Print the list for each video
+            print(video_details)
+
+        # Specify the path for the CSV file
+        csv_file_path = "MartinGarrix_video_details.csv"
+
+        # Write video details to CSV
+        write_to_csv(csv_file_path, videos_data)
+        print(f"\nVideo details have been written to {csv_file_path}")
+        # Download the CSV file
+        from google.colab import files
+        files.download(csv_file_path)
+    else:
+        print("Failed to fetch videos data.")
+
+if __name__ == "__main__":
+    main()
+
+                dislikes = "N/A"
+    # Additional details
+            channel_title = item["snippet"]["channelTitle"]
+            description = item["snippet"]["description"]
+            tags = item["snippet"]["tags"] if "tags" in item["snippet"] else []
+
+            duration = item["contentDetails"]["duration"] if "contentDetails" in item else "N/A"
+
+            privacy_status = item["status"]["privacyStatus"] if "status" in item else "N/A"
+
+            video_details = [
+            f"Title: {video_title}",
+            f"Published At: {published_at}",
+            f"Channel Title: {channel_title}",
+            f"Views: {views}",
+            f"Likes: {likes}",
+            f"Dislikes: {dislikes}",
+            f"Comments: {comments}",
+            f"Description: {description}",
+            f"Tags: {', '.join(tags)}",
+            f"Duration: {duration}",
+            f"Privacy Status: {privacy_status}\n"
+            ]
+
+            print(video_details)
+
+    else:
+        print("Failed to fetch videos data.")
+
+if __name__ == "__main__":
+    main()
